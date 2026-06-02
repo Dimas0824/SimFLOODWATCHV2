@@ -77,6 +77,9 @@ class FloodWatchSimulator:
         self.node = node
         self.runtime = SimulatorRuntime.from_node(node)
 
+    def _is_manual_simulation(self) -> bool:
+        return self.node.simulation_mode == IoTNode.SimulationMode.MANUAL
+
     def classify_status(
         self,
         distance_cm: float,
@@ -123,6 +126,17 @@ class FloodWatchSimulator:
         return candidate
 
     def _generate_raw_distance(self) -> tuple[float | None, int]:
+        if self._is_manual_simulation():
+            raw_distance = clamp_float(
+                self.node.simulation_distance_cm + self.node.simulation_drift_bias_cm,
+                0.0,
+                self.node.sensor_offset_cm,
+            )
+            self.runtime.last_distance_cm = raw_distance
+            self.runtime.ultrasonic_consecutive_failures = 0
+            self.runtime.ultrasonic_using_held_value = False
+            return raw_distance, 5
+
         base_distance_cm = clamp_float(self.node.baseline_distance_cm, 0.0, self.node.sensor_offset_cm)
         runtime_data = self.runtime.dump()
         raw_distance = generate_distance_for_scenario(
@@ -153,6 +167,7 @@ class FloodWatchSimulator:
 
         self.runtime.ultrasonic_consecutive_failures = 0
         self.runtime.ultrasonic_using_held_value = False
+        raw_distance += self.node.simulation_drift_bias_cm
         raw_distance = clamp_float(raw_distance, 0.0, self.node.sensor_offset_cm)
         self.runtime.last_distance_cm = raw_distance
         return raw_distance, 5
@@ -169,6 +184,8 @@ class FloodWatchSimulator:
         return round_distance(clamp_float(smoothed, 0.0, self.node.sensor_offset_cm), self.node.distance_decimals)
 
     def _resolve_water_switch(self, distance_cm: float | None) -> bool:
+        if self._is_manual_simulation():
+            return bool(self.node.simulation_water_active)
         if distance_cm is None:
             return False
         threshold = min(25.0, self.node.sensor_offset_cm * 0.25)

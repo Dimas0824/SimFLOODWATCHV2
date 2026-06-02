@@ -34,6 +34,10 @@ class IoTNode(models.Model):
         AUTO = "AUTO", "AUTO"
         MANUAL = "MANUAL", "MANUAL"
 
+    class SimulationMode(models.TextChoices):
+        SCENARIO = "SCENARIO", "SCENARIO"
+        MANUAL = "MANUAL", "MANUAL"
+
     node_id = models.CharField(max_length=50, unique=True)
     node_name = models.CharField(max_length=100, default="FloodWatch Node")
     site_name = models.CharField(max_length=100, default="Kampus")
@@ -44,11 +48,21 @@ class IoTNode(models.Model):
     physical_id = models.CharField(max_length=50, blank=True)
 
     is_active = models.BooleanField(default=True)
+    simulator_enabled = models.BooleanField(default=False)
+    mqtt_enabled = models.BooleanField(default=False)
     current_scenario = models.CharField(
         max_length=50,
         choices=SCENARIO_CHOICES,
         default=SCENARIO_NORMAL,
     )
+    simulation_mode = models.CharField(
+        max_length=10,
+        choices=SimulationMode.choices,
+        default=SimulationMode.SCENARIO,
+    )
+    simulation_distance_cm = models.FloatField(default=42.0)
+    simulation_water_active = models.BooleanField(default=False)
+    simulation_drift_bias_cm = models.FloatField(default=0.0)
     interval_seconds = models.PositiveSmallIntegerField(default=5)
     baseline_distance_cm = models.FloatField(default=42.0)
     sensor_offset_cm = models.FloatField(default=100.0)
@@ -105,9 +119,13 @@ class IoTNode(models.Model):
         valid_scenarios = {key for key, _ in SCENARIO_CHOICES}
         if self.current_scenario not in valid_scenarios:
             self.current_scenario = SCENARIO_NORMAL
+        if self.simulation_mode not in {self.SimulationMode.SCENARIO, self.SimulationMode.MANUAL}:
+            self.simulation_mode = self.SimulationMode.SCENARIO
         self.interval_seconds = max(1, min(int(self.interval_seconds or 1), 3600))
         self.sensor_offset_cm = max(2.0, min(float(self.sensor_offset_cm or 100.0), 400.0))
         self.baseline_distance_cm = max(0.0, min(float(self.baseline_distance_cm or 42.0), self.sensor_offset_cm))
+        self.simulation_distance_cm = max(0.0, min(float(self.simulation_distance_cm or 0.0), self.sensor_offset_cm))
+        self.simulation_drift_bias_cm = max(-200.0, min(float(self.simulation_drift_bias_cm or 0.0), 200.0))
         self.aman_min_percent = max(50.0, min(float(self.aman_min_percent or 70.0), 95.0))
         self.waspada_min_percent = max(5.0, min(float(self.waspada_min_percent or 45.0), 90.0))
         if self.waspada_min_percent >= self.aman_min_percent:
@@ -155,6 +173,12 @@ class IoTNode(models.Model):
             "coordinate_label": self.coordinate_label,
             "status": self.current_status,
             "control_mode": self.control_mode,
+            "simulation_mode": self.simulation_mode,
+            "simulator_enabled": self.simulator_enabled,
+            "mqtt_enabled": self.mqtt_enabled,
+            "simulation_distance_cm": self.simulation_distance_cm,
+            "simulation_water_active": self.simulation_water_active,
+            "simulation_drift_bias_cm": self.simulation_drift_bias_cm,
             "water_switch": self.current_water_active,
             "sensor_offset_cm": self.sensor_offset_cm,
             "sensor_height_cm": self.sensor_offset_cm,

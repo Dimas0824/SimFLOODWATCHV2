@@ -19,6 +19,16 @@ def clamp_int(value: int, min_value: int, max_value: int) -> int:
     return max(min_value, min(value, max_value))
 
 
+def parse_boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def servo_percent_to_degree(percent: int) -> int:
     return (clamp_int(percent, 0, 100) * 180 + 50) // 100
 
@@ -57,6 +67,13 @@ def apply_control_message(node: IoTNode, payload: dict[str, Any], persist: bool 
         interval_seconds = clamp_int(int(payload.get("interval_seconds", node.interval_seconds)), 1, 3600)
         node.interval_seconds = interval_seconds
         updates.append(f"interval_seconds={interval_seconds}")
+
+    if command == "set_simulation_mode":
+        simulation_mode = str(payload.get("simulation_mode", node.simulation_mode)).upper().strip()
+        if simulation_mode not in {IoTNode.SimulationMode.SCENARIO, IoTNode.SimulationMode.MANUAL}:
+            raise ValueError(f"Simulation mode `{simulation_mode}` tidak didukung.")
+        node.simulation_mode = simulation_mode
+        updates.append(f"simulation_mode={simulation_mode}")
 
     if command == "set_servo":
         node.control_mode = IoTNode.ControlMode.MANUAL
@@ -121,8 +138,36 @@ def apply_control_message(node: IoTNode, payload: dict[str, Any], persist: bool 
         if key in payload:
             node.sensor_offset_cm = max(2.0, min(float(payload[key]), 400.0))
             node.baseline_distance_cm = min(node.baseline_distance_cm, node.sensor_offset_cm)
+            node.simulation_distance_cm = min(node.simulation_distance_cm, node.sensor_offset_cm)
             updates.append(f"sensor_offset_cm={node.sensor_offset_cm}")
             break
+
+    if "simulation_mode" in payload:
+        simulation_mode = str(payload["simulation_mode"]).upper().strip()
+        if simulation_mode not in {IoTNode.SimulationMode.SCENARIO, IoTNode.SimulationMode.MANUAL}:
+            raise ValueError(f"Simulation mode `{simulation_mode}` tidak didukung.")
+        node.simulation_mode = simulation_mode
+        updates.append(f"simulation_mode={simulation_mode}")
+
+    if "simulator_enabled" in payload:
+        node.simulator_enabled = parse_boolish(payload["simulator_enabled"])
+        updates.append(f"simulator_enabled={node.simulator_enabled}")
+
+    if "mqtt_enabled" in payload:
+        node.mqtt_enabled = parse_boolish(payload["mqtt_enabled"])
+        updates.append(f"mqtt_enabled={node.mqtt_enabled}")
+
+    if "simulation_distance_cm" in payload:
+        node.simulation_distance_cm = max(0.0, min(float(payload["simulation_distance_cm"]), node.sensor_offset_cm))
+        updates.append(f"simulation_distance_cm={node.simulation_distance_cm}")
+
+    if "simulation_water_active" in payload:
+        node.simulation_water_active = parse_boolish(payload["simulation_water_active"])
+        updates.append(f"simulation_water_active={node.simulation_water_active}")
+
+    if "simulation_drift_bias_cm" in payload:
+        node.simulation_drift_bias_cm = max(-200.0, min(float(payload["simulation_drift_bias_cm"]), 200.0))
+        updates.append(f"simulation_drift_bias_cm={node.simulation_drift_bias_cm}")
 
     metadata_keys = {
         "nodeName": "node_name",
@@ -150,5 +195,8 @@ def apply_control_message(node: IoTNode, payload: dict[str, Any], persist: bool 
         "control_mode": node.control_mode,
         "manual_servo_target": node.manual_servo_target,
         "current_scenario": node.current_scenario,
+        "simulation_mode": node.simulation_mode,
+        "simulator_enabled": node.simulator_enabled,
+        "mqtt_enabled": node.mqtt_enabled,
         "interval_seconds": node.interval_seconds,
     }
